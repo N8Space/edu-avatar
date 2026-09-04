@@ -20,14 +20,8 @@ export const MyComposition = ({
 }) => {
     const { fps, durationInFrames, width, height } = useVideoConfig();
 
-    // Check if the source is likely a video (from HeyGen or proxying an mp4)
-    // We check the RAW videoUrl, not the proxied one, to be sure.
+    // Check if the source is an MP4 video or an audio track
     const isVideo = videoUrl?.includes('.mp4');
-
-    // Use the proxy for the audio/video source if needed.
-    // However, if it's a direct HeyGen MP4 URL, we might want to try direct playback first 
-    // to avoid proxying large video files. But for CORS safety, we might stick to proxy.
-    // Let's try direct first for MP4 to avoid overhead, relying on HeyGen's CDN CORS.
     const mediaSrc = isVideo ? videoUrl : proxyUrl(videoUrl);
 
     return (

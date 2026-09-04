@@ -1,4 +1,4 @@
-﻿name: Edu-Avatar CI/CD Pipeline
+name: Edu-Avatar CI/CD Pipeline
 
 on:
   push:
@@ -41,8 +41,6 @@ jobs:
           NEXT_TELEMETRY_DISABLED: 1
           NODE_ENV: production
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY || 'ci-dummy-key' }}
-          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY || 'ci-dummy-key' }}
-          HEYGEN_API_KEY: ${{ secrets.HEYGEN_API_KEY || 'ci-dummy-key' }}
 
   deploy:
     name: Deploy to Hostinger VPS
@@ -83,8 +81,6 @@ jobs:
               echo "Configuring environment..."
               cat << 'EOF' > .env.local
             GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
-            ELEVENLABS_API_KEY=${{ secrets.ELEVENLABS_API_KEY }}
-            HEYGEN_API_KEY=${{ secrets.HEYGEN_API_KEY }}
             GOOGLE_SERVICE_ACCOUNT_JSON='${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}'
             GOOGLE_DRIVE_FOLDER_ID=${{ secrets.GOOGLE_DRIVE_FOLDER_ID || '1bogWnsdHz_qjW-AHA5y9QAHWa7PdTQLw' }}
             EOF

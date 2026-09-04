@@ -20,12 +20,11 @@ export default function CreatePage() {
     const [step, setStep] = useState(0);
     const [progress, setProgress] = useState(0);
 
-    // Voice Cloning State
+    // User Voice State (Direct Recording / Upload or Gemini AI Voice)
     const [isRecording, setIsRecording] = useState(false);
     const [timer, setTimer] = useState(0);
-    const [voiceId, setVoiceId] = useState<string | null>(null);
-    const [cloningStatus, setCloningStatus] = useState<"idle" | "recording" | "uploading" | "done" | "error">("idle");
-    const [cloningError, setCloningError] = useState<string | null>(null);
+    const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
+    const [audioSourceLabel, setAudioSourceLabel] = useState<string | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -36,6 +35,18 @@ export default function CreatePage() {
             const reader = new FileReader();
             reader.onloadend = () => {
                 setSelectedImage(reader.result as string);
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
+    const handleAudioFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setRecordedAudioUrl(reader.result as string);
+                setAudioSourceLabel(`Uploaded: ${file.name}`);
             };
             reader.readAsDataURL(file);
         }
@@ -52,20 +63,19 @@ export default function CreatePage() {
                 if (e.data.size > 0) chunksRef.current.push(e.data);
             };
 
-            mediaRecorder.onstop = async () => {
+            mediaRecorder.onstop = () => {
                 const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-                if (timer < 30) {
-                    if (!confirm("Your recording is quite short (< 30s). Quality might be low. Clone anyway?")) {
-                        return;
-                    }
-                }
-                await handleVoiceUpload(blob);
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    setRecordedAudioUrl(reader.result as string);
+                    setAudioSourceLabel(`Recorded Voice (${timer}s)`);
+                };
+                reader.readAsDataURL(blob);
                 stream.getTracks().forEach(track => track.stop());
             };
 
             mediaRecorder.start();
             setIsRecording(true);
-            setCloningStatus("recording");
             setTimer(0);
             timerRef.current = setInterval(() => {
                 setTimer(t => t + 1);
@@ -81,32 +91,11 @@ export default function CreatePage() {
         if (mediaRecorderRef.current && isRecording) {
             mediaRecorderRef.current.stop();
             setIsRecording(false);
-            setCloningStatus("uploading");
             if (timerRef.current) clearInterval(timerRef.current);
         }
     };
 
-    // Reading Script
     const readingScript = "When the sunlight strikes raindrops in the air, they act as a prism and form a rainbow. The rainbow is a division of white light into many beautiful colors. These take the shape of a long round arch, with its path high above, and its two ends apparently beyond the horizon. There is, according to legend, a boiling pot of gold at one end. People look, but no one ever finds it. When a man looks for something beyond his reach, his friends say he is looking for the pot of gold at the end of the rainbow.";
-
-    const handleVoiceUpload = async (audioBlob: Blob) => {
-        try {
-            setCloningError(null);
-            const { ApiService } = await import("@/lib/api-service");
-            const result = await ApiService.cloneVoice(audioBlob);
-
-            if (result.voiceId) {
-                setVoiceId(result.voiceId);
-                setCloningStatus("done");
-            } else {
-                setCloningStatus("error");
-                setCloningError(result.error || "Failed to clone voice");
-            }
-        } catch (e: any) {
-            setCloningStatus("error");
-            setCloningError(e?.message || "Failed to clone voice");
-        }
-    };
 
     const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
     const isOverWordLimit = wordCount > 500;
@@ -126,7 +115,7 @@ export default function CreatePage() {
 
         try {
             const { ApiService } = await import("@/lib/api-service");
-            const result = await ApiService.generateFullVideo(content, selectedImage, voiceId, (status) => {
+            const result = await ApiService.generateFullVideo(content, selectedImage, recordedAudioUrl, (status) => {
                 setProgress(status.progress);
                 if (status.step === 'error') {
                     setLoading(false);
@@ -175,7 +164,7 @@ export default function CreatePage() {
                         <span>← Nathan Lester | AI Enablement Showcase</span>
                     </a>
                     <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-mono">
-                        Hostinger + Google Cloud
+                        Hostinger + Google Cloud (Zero SaaS)
                     </span>
                 </div>
 
@@ -191,7 +180,7 @@ export default function CreatePage() {
                         <Card className="shadow-lg">
                             <CardHeader>
                                 <CardTitle>Content Input</CardTitle>
-                                <CardDescription>Provide your avatar selfie, optional voice sample, and educational topic.</CardDescription>
+                                <CardDescription>Provide your avatar selfie, voice track, and educational topic.</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 {/* Step 1: Avatar Image */}
@@ -217,74 +206,40 @@ export default function CreatePage() {
                                     </div>
                                 </div>
 
-                                {/* Step 2: Voice Cloning */}
+                                {/* Step 2: Voice Track */}
                                 <div className="space-y-2">
-                                    <Label className="text-blue-100">2. Your Voice (Optional)</Label>
+                                    <Label className="text-blue-100">2. Voice Track (Your Voice or Gemini AI)</Label>
                                     <div className="p-4 border border-white/10 rounded-lg bg-black/20 flex flex-col gap-4">
-                                        {cloningStatus === "done" ? (
-                                            <div className="flex items-center justify-between text-green-400 gap-2 neon-text">
+                                        {recordedAudioUrl ? (
+                                            <div className="flex items-center justify-between text-green-400 gap-2 neon-text p-2 rounded bg-green-950/20 border border-green-500/30">
                                                 <div className="flex items-center gap-2">
-                                                    <CheckCircle2 className="w-5 h-5" />
+                                                    <CheckCircle2 className="w-5 h-5 shrink-0" />
                                                     <div>
-                                                        <p className="text-sm font-bold">Voice Cloned Successfully!</p>
-                                                        <p className="text-xs text-green-300/70">ID: {voiceId?.slice(0, 10)}...</p>
+                                                        <p className="text-sm font-bold">Personal Voice Selected</p>
+                                                        <p className="text-xs text-green-300/70">{audioSourceLabel}</p>
                                                     </div>
                                                 </div>
                                                 <Button
                                                     variant="ghost"
                                                     size="sm"
                                                     onClick={() => {
-                                                        setVoiceId(null);
-                                                        setCloningStatus("idle");
+                                                        setRecordedAudioUrl(null);
+                                                        setAudioSourceLabel(null);
                                                     }}
                                                     className="text-xs text-gray-400 hover:text-white"
                                                 >
-                                                    Remove
+                                                    Use Gemini AI Voice
                                                 </Button>
                                             </div>
                                         ) : (
                                             <>
-                                                {cloningError && (
-                                                    <div className="p-3 rounded border border-amber-500/30 bg-amber-500/10 text-amber-200 text-xs flex flex-col gap-2">
-                                                        <div className="flex items-start gap-2">
-                                                            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                                                            <div>
-                                                                <p className="font-semibold text-amber-300">Voice Cloning Notice</p>
-                                                                <p className="text-amber-200/90 mt-1 leading-relaxed">{cloningError}</p>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex items-center justify-between pt-1 border-t border-amber-500/20">
-                                                            <span className="text-[11px] text-amber-300/70">Automatic high-definition Gemini TTS fallback active.</span>
-                                                            <Button
-                                                                variant="secondary"
-                                                                size="sm"
-                                                                type="button"
-                                                                className="h-7 text-xs px-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200"
-                                                                onClick={() => {
-                                                                    setCloningError(null);
-                                                                    setCloningStatus("idle");
-                                                                    setVoiceId(null);
-                                                                }}
-                                                            >
-                                                                Use Free Voice
-                                                            </Button>
-                                                        </div>
-                                                    </div>
-                                                )}
-
                                                 {/* Option A: File Upload */}
-                                                <div className="space-y-2 pb-4 border-b border-white/10">
+                                                <div className="space-y-2 pb-3 border-b border-white/10">
                                                     <Label className="text-xs text-blue-300/70 uppercase tracking-wider font-semibold">Option A: Upload Audio File</Label>
                                                     <input
                                                         type="file"
                                                         accept="audio/*"
-                                                        onChange={async (e) => {
-                                                            const file = e.target.files?.[0];
-                                                            if (file) {
-                                                                setCloningStatus("uploading");
-                                                                await handleVoiceUpload(file);
-                                                            }
-                                                        }}
+                                                        onChange={handleAudioFileUpload}
                                                         className="block w-full text-sm text-blue-200
                                                         file:mr-4 file:py-2 file:px-4
                                                         file:rounded-full file:border-0
@@ -295,19 +250,19 @@ export default function CreatePage() {
                                                 </div>
 
                                                 {/* Option B: Record */}
-                                                <div className="space-y-2 pt-2">
-                                                    <Label className="text-xs text-blue-300/70 uppercase tracking-wider font-semibold">Option B: Record Microphone</Label>
-                                                    <div className="bg-black/30 p-3 rounded border border-white/10 text-sm text-blue-100/80 leading-relaxed italic">
-                                                        <p className="font-semibold text-cyan-400 mb-1 not-italic">Please read this script (~60s):</p>
+                                                <div className="space-y-2 pt-1">
+                                                    <Label className="text-xs text-blue-300/70 uppercase tracking-wider font-semibold">Option B: Record Your Voice</Label>
+                                                    <div className="bg-black/30 p-3 rounded border border-white/10 text-xs text-blue-100/80 leading-relaxed italic">
+                                                        <p className="font-semibold text-cyan-400 mb-1 not-italic">Suggested script or speak your topic:</p>
                                                         "{readingScript}"
                                                     </div>
 
                                                     <div className="flex flex-col gap-2">
                                                         {isRecording && (
-                                                            <div className={`text-center font-mono font-bold text-xl ${timer < 30 ? 'text-orange-500' : 'text-green-600'}`}>
+                                                            <div className={`text-center font-mono font-bold text-lg ${timer < 10 ? 'text-orange-400' : 'text-green-400'}`}>
                                                                 {Math.floor(timer / 60)}:{(timer % 60).toString().padStart(2, '0')}
                                                                 <span className="text-xs font-sans font-normal text-gray-400 block">
-                                                                    {timer < 60 ? "(Keep going, aim for 1 min)" : "(Great length!)"}
+                                                                    Recording in progress...
                                                                 </span>
                                                             </div>
                                                         )}
@@ -315,17 +270,22 @@ export default function CreatePage() {
                                                         <Button
                                                             variant={isRecording ? "destructive" : "secondary"}
                                                             size="sm"
+                                                            type="button"
                                                             onClick={isRecording ? stopRecording : startRecording}
                                                             className="w-full"
-                                                            disabled={cloningStatus === "uploading"}
                                                         >
                                                             {isRecording ? (
                                                                 <> <Square className="w-4 h-4 mr-2" /> Stop Recording </>
                                                             ) : (
-                                                                <> <Mic className="w-4 h-4 mr-2" /> {cloningStatus === "uploading" ? "Cloning..." : "Start Recording"} </>
+                                                                <> <Mic className="w-4 h-4 mr-2" /> Start Recording </>
                                                             )}
                                                         </Button>
                                                     </div>
+                                                </div>
+
+                                                <div className="pt-2 border-t border-white/10 text-[11px] text-muted-foreground flex items-center gap-1.5">
+                                                    <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                                                    <span>If no audio is provided, <strong>Google Gemini 2.5 Flash TTS</strong> will automatically synthesize speech ($0.00).</span>
                                                 </div>
                                             </>
                                         )}
@@ -408,11 +368,11 @@ export default function CreatePage() {
                                         </div>
                                         <div className="flex items-center gap-2">
                                             {progress >= 70 ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : (progress >= 30 && <Loader2 className="h-4 w-4 animate-spin" />)}
-                                            Voice synthesis ({voiceId ? "Custom Cloned" : "Gemini TTS Free"})...
+                                            Voice track ({recordedAudioUrl ? "Personal Audio" : "Gemini 2.5 Flash TTS"})...
                                         </div>
                                         <div className="flex items-center gap-2">
                                             {progress >= 100 ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : (progress >= 70 && <Loader2 className="h-4 w-4 animate-spin" />)}
-                                            Rendering video & Google Drive archive...
+                                            Remotion video rendering & Google Drive archive...
                                         </div>
                                     </div>
                                 </CardContent>

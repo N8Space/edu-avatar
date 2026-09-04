@@ -52,7 +52,7 @@ export default function Home() {
             </div>
             <h3 className="text-base font-bold text-white">Talking Avatars & Remotion</h3>
             <p className="text-xs text-blue-200/70 leading-relaxed">
-              Upload your selfie to generate animated video with synchronized captions via Remotion and HeyGen fallback.
+              Upload your selfie to generate an animated video with synchronized captions rendered directly by the Remotion engine.
             </p>
           </div>
 
@@ -60,9 +60,9 @@ export default function Home() {
             <div className="w-10 h-10 rounded-full bg-secondary/20 flex items-center justify-center text-secondary mb-1 neon-border">
               <Mic className="w-5 h-5" />
             </div>
-            <h3 className="text-base font-bold text-white">Voice Cloning & Gemini TTS</h3>
+            <h3 className="text-base font-bold text-white">Real Voice & Gemini TTS</h3>
             <p className="text-xs text-blue-200/70 leading-relaxed">
-              Clone your microphone audio or fall back seamlessly to zero-cost high-fidelity Gemini 2.5 Flash TTS synthesis.
+              Use your microphone to record your own voice, or let Google Gemini 2.5 Flash TTS synthesize natural educational narration for free.
             </p>
           </div>
 
