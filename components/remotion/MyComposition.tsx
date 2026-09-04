@@ -18,8 +18,6 @@ export const MyComposition = ({
     captions?: string;
     imageUrl?: string;
 }) => {
-    const { fps, durationInFrames, width, height } = useVideoConfig();
-
     // Check if the source is an MP4 video or an audio track
     const isVideo = videoUrl?.includes('.mp4');
     const mediaSrc = isVideo ? videoUrl : proxyUrl(videoUrl);

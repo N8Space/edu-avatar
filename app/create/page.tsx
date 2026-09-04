@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Loader2, Play, CheckCircle2, Mic, Video, Square, Sparkles, AlertCircle, ShieldAlert, HardDrive, ExternalLink } from "lucide-react";
+import { Loader2, Play, CheckCircle2, Mic, Video, Square, Sparkles, ShieldAlert, HardDrive, ExternalLink } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { PlayerComponent } from "@/components/remotion/PlayerComponent";
 
@@ -141,8 +141,9 @@ export default function CreatePage() {
                 setLoading(false);
                 setStep(0);
             }
-        } catch (e: any) {
-            console.warn("Generate Error:", e?.message || e);
+        } catch (e: unknown) {
+            const err = e as Error;
+            console.warn("Generate Error:", err?.message || e);
             setLoading(false);
             setStep(0);
         }

@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 import * as path from 'path';
 import * as fs from 'fs';
+import { Readable } from 'stream';
 
 // SCOPES for Drive API
 const SCOPES = ['https://www.googleapis.com/auth/drive'];
@@ -69,7 +70,6 @@ export class GoogleDriveService {
         }
 
         try {
-            const { Readable } = require('stream');
             const stream = Readable.from(buffer);
 
             const requestBody: any = {
