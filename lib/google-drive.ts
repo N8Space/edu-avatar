@@ -1,37 +1,77 @@
 import { google } from 'googleapis';
 import * as path from 'path';
+import * as fs from 'fs';
 
 // SCOPES for Drive API
 const SCOPES = ['https://www.googleapis.com/auth/drive'];
+export const DEFAULT_DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '1bogWnsdHz_qjW-AHA5y9QAHWa7PdTQLw';
+
+export interface DriveUploadResult {
+    success: boolean;
+    id?: string;
+    webContentLink?: string;
+    webViewLink?: string;
+    error?: string;
+}
 
 export class GoogleDriveService {
-    private drive;
+    private drive: any = null;
+    private initError: string | null = null;
 
     constructor() {
-        const keyFilePath = path.join(process.cwd(), 'service_account_key.json');
+        try {
+            let auth;
+            if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+                const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+                auth = new google.auth.GoogleAuth({
+                    credentials,
+                    scopes: SCOPES,
+                });
+            } else {
+                const keyFilePath = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.join(process.cwd(), 'service_account_key.json');
+                if (fs.existsSync(keyFilePath)) {
+                    auth = new google.auth.GoogleAuth({
+                        keyFile: keyFilePath,
+                        scopes: SCOPES,
+                    });
+                } else {
+                    this.initError = `Service account key file not found at ${keyFilePath}`;
+                }
+            }
 
-        const auth = new google.auth.GoogleAuth({
-            keyFile: keyFilePath,
-            scopes: SCOPES,
-        });
-
-        this.drive = google.drive({ version: 'v3', auth });
+            if (auth) {
+                this.drive = google.drive({ version: 'v3', auth });
+            }
+        } catch (e: any) {
+            this.initError = e?.message || "Failed to initialize Google Auth";
+        }
     }
 
     /**
-     * Uploads a file to Google Drive and sets it to be publicly readable.
+     * Uploads a file to Google Drive folder and sets it to be publicly readable if permitted.
      * @param buffer The file content as a Buffer.
      * @param filename The name of the file.
      * @param mimeType The MIME type of the file.
-     * @param parentFolderId The ID of the folder to upload to (optional).
+     * @param parentFolderId The ID of the folder to upload to (defaults to DEFAULT_DRIVE_FOLDER_ID).
      */
-    async uploadFile(buffer: Buffer, filename: string, mimeType: string, parentFolderId?: string) {
+    async uploadFile(
+        buffer: Buffer,
+        filename: string,
+        mimeType: string,
+        parentFolderId: string = DEFAULT_DRIVE_FOLDER_ID
+    ): Promise<DriveUploadResult> {
+        if (!this.drive) {
+            console.warn("Google Drive Service not initialized:", this.initError);
+            return {
+                success: false,
+                error: this.initError || "Drive client not configured",
+            };
+        }
+
         try {
-            // 1. Create a readable stream from the buffer
             const { Readable } = require('stream');
             const stream = Readable.from(buffer);
 
-            // 2. Metadata
             const requestBody: any = {
                 name: filename,
                 mimeType,
@@ -40,7 +80,6 @@ export class GoogleDriveService {
                 requestBody.parents = [parentFolderId];
             }
 
-            // 3. Upload
             const response = await this.drive.files.create({
                 requestBody,
                 media: {
@@ -52,9 +91,11 @@ export class GoogleDriveService {
             });
 
             const fileId = response.data.id;
-            if (!fileId) throw new Error('File upload failed (no ID returned)');
+            if (!fileId) {
+                return { success: false, error: "File upload returned no ID" };
+            }
 
-            // 4. Make Public (Anyone with link can view)
+            // Attempt to make public for direct playback/sharing
             try {
                 await this.drive.permissions.create({
                     fileId,
@@ -62,21 +103,26 @@ export class GoogleDriveService {
                         role: 'reader',
                         type: 'anyone',
                     },
+                    supportsAllDrives: true,
                 });
             } catch (permError: any) {
-                console.warn("Warning: Could not make file public (Org Policy?):", permError.message);
-                // Proceed anyway, maybe the user has other ways to access it
+                console.warn("Google Drive: Could not set public permission (Org policy or limited role):", permError?.message);
             }
 
             return {
+                success: true,
                 id: fileId,
                 webContentLink: response.data.webContentLink,
                 webViewLink: response.data.webViewLink,
             };
 
-        } catch (error) {
-            console.error('Google Drive Upload Error:', error);
-            throw error;
+        } catch (error: any) {
+            const errMsg = error?.response?.data?.error?.message || error?.message || "Google Drive upload failed";
+            console.warn('Google Drive Upload Warning:', errMsg);
+            return {
+                success: false,
+                error: errMsg,
+            };
         }
     }
 }

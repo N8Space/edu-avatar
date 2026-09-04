@@ -5,8 +5,20 @@ export interface VideoGenerationStatus {
     error?: string;
 }
 
+export interface CloneVoiceResult {
+    voiceId: string | null;
+    error?: string;
+}
+
+export interface GenerateVideoOutput {
+    videoUrl: string;
+    driveUrl?: string | null;
+    summary?: string;
+    provider?: string;
+}
+
 export const ApiService = {
-    async cloneVoice(audioBlob: Blob): Promise<string | null> {
+    async cloneVoice(audioBlob: Blob): Promise<CloneVoiceResult> {
         try {
             const formData = new FormData();
             formData.append("audio", audioBlob, "recording.webm");
@@ -16,61 +28,70 @@ export const ApiService = {
                 body: formData,
             });
 
+            const data = await res.json().catch(() => null);
+
             if (!res.ok) {
-                const err = await res.json().catch(() => ({ error: res.statusText }));
-                throw new Error(err.error || "Voice cloning failed");
+                return {
+                    voiceId: null,
+                    error: data?.error || res.statusText || "Voice cloning failed",
+                };
             }
 
-            const data = await res.json();
-            return data.voice_id;
-        } catch (e) {
-            console.error("Voice Clone Service Error:", e);
-            return null;
+            return { voiceId: data?.voice_id || null };
+        } catch (e: any) {
+            return {
+                voiceId: null,
+                error: e?.message || "Voice cloning request failed",
+            };
         }
     },
 
     async generateFullVideo(
         text: string,
         userImageUrl: string | null,
-        voiceId: string | null, // New Parameter
+        voiceId: string | null, // Optional custom cloned voice
         onProgress: (status: VideoGenerationStatus) => void
-    ): Promise<string | null> {
+    ): Promise<GenerateVideoOutput | null> {
         try {
-            // Step 1: Summary (Gemini)
+            // Step 1: Summary (Gemini 3.6 Flash + Guardrails)
             onProgress({ step: 'summarizing', progress: 10 });
             const summaryRes = await fetch('/api/generate/summary', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text })
             });
+
             if (!summaryRes.ok) {
                 const err = await summaryRes.json().catch(() => ({ error: 'Unknown error' }));
-                throw new Error(err.error || `Summary API failed: ${summaryRes.statusText}`);
+                const errorObj: any = new Error(err.error || `Summary API failed: ${summaryRes.statusText}`);
+                errorObj.safetyViolation = err.safetyViolation;
+                errorObj.category = err.category;
+                throw errorObj;
             }
-            const { summary } = await summaryRes.json();
-            console.log("Summary:", summary);
-            onProgress({ step: 'summarizing', progress: 30 });
 
-            // Step 2: Audio (ElevenLabs)
+            const { summary } = await summaryRes.json();
+            console.log("Summary generated successfully:", summary);
+            onProgress({ step: 'summarizing', progress: 30, data: { summary } });
+
+            // Step 2: Audio Synthesis (ElevenLabs or Gemini TTS fallback)
             onProgress({ step: 'audio', progress: 40 });
             const audioRes = await fetch('/api/generate/audio', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text: summary, voiceId: voiceId || undefined })
             });
+
             if (!audioRes.ok) {
                 const err = await audioRes.json().catch(() => ({ error: 'Unknown error' }));
                 throw new Error(err.error || `Audio API failed: ${audioRes.statusText}`);
             }
+
             const { audioUrl } = await audioRes.json();
-            console.log("Audio Generated");
+            console.log("Audio generated successfully");
             onProgress({ step: 'audio', progress: 70 });
 
-            // Step 3: Video (HeyGen)
+            // Step 3: Video Generation / Remotion Player Mode & Drive Archive
             onProgress({ step: 'video', progress: 80 });
-            // For MVP, we play the audio immediately in the UI if video generation is skipped/mocked 
-            // or we pass it to the video generator.
-            // Since our Video Route is hybrid/mock, we'll call it to get the "video_id".
 
             const videoRes = await fetch('/api/generate/video', {
                 method: 'POST',
@@ -86,27 +107,25 @@ export const ApiService = {
                 throw new Error(err.error || `Video API failed: ${videoRes.statusText}`);
             }
 
-            // Fix: Parse the new flat response structure
-            const videoData = await videoRes.json(); // { id, status, video_url }
+            const videoData = await videoRes.json();
             console.log("Video API Response:", videoData);
 
-            // If it's already completed (Mock or n8n immediate link), return early
+            // Immediate completed mode (Remotion dynamic player mode or mock)
             if (videoData.status === 'completed' && videoData.video_url) {
-                console.log("Immediate Success! URL:", videoData.video_url);
-
-                // Note: We cannot HEAD fetch google drive links from client due to CORS, 
-                // but the direct link should work in the Audio tag if public.
-
-                // Ensure we pass the data in a consistent structure
-                // The interface says 'data?: any', but components might expect { video_url }
-                onProgress({ step: 'complete', progress: 100, data: videoData });
-                return videoData.video_url;
+                const output: GenerateVideoOutput = {
+                    videoUrl: videoData.video_url,
+                    driveUrl: videoData.drive_url || null,
+                    summary,
+                    provider: videoData.provider || "remotion",
+                };
+                onProgress({ step: 'complete', progress: 100, data: output });
+                return output;
             }
 
             const video_id = videoData.id;
-            console.log("Polling for video:", video_id);
+            console.log("Polling HeyGen video status for job:", video_id);
 
-            // Poll for completion (Only if not already done)
+            // Poll for HeyGen completion
             let attempts = 0;
             const maxAttempts = 150; // 5 minutes (150 * 2000ms)
 
@@ -122,14 +141,19 @@ export const ApiService = {
 
                         if (statusRes.ok) {
                             const statusData = await statusRes.json();
-                            // Handle both structures just in case (nested data or flat)
                             const status = statusData.data?.status || statusData.status;
                             const url = statusData.data?.video_url || statusData.video_url;
 
                             if (status === 'completed') {
                                 clearInterval(pollInterval);
-                                onProgress({ step: 'complete', progress: 100, data: statusData });
-                                resolve(url);
+                                const output: GenerateVideoOutput = {
+                                    videoUrl: url,
+                                    driveUrl: statusData.data?.drive_url || statusData.drive_url || null,
+                                    summary,
+                                    provider: "heygen",
+                                };
+                                onProgress({ step: 'complete', progress: 100, data: output });
+                                resolve(output);
                             } else if (status === 'failed' || status === 'error') {
                                 clearInterval(pollInterval);
                                 const errorReason = statusData.data?.error || statusData.error || 'Video generation failed at provider';
@@ -137,7 +161,7 @@ export const ApiService = {
                             }
                         }
                     } catch (e) {
-                        console.error("Polling error", e);
+                        console.error("Polling error:", e);
                     }
 
                     if (attempts >= maxAttempts) {
@@ -148,8 +172,16 @@ export const ApiService = {
             });
 
         } catch (e: any) {
-            console.error(e);
-            onProgress({ step: 'error', progress: 0, error: e.message });
+            console.warn("Video Generation Pipeline Error:", e?.message || e);
+            onProgress({
+                step: 'error',
+                progress: 0,
+                error: e?.message || "Generation failed",
+                data: {
+                    safetyViolation: e?.safetyViolation,
+                    category: e?.category,
+                }
+            });
             return null;
         }
     }

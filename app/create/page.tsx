@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Loader2, Play, CheckCircle2, FileText, Mic, Video, Square, Sparkles } from "lucide-react";
+import { Loader2, Play, CheckCircle2, Mic, Video, Square, Sparkles, AlertCircle, ShieldAlert, HardDrive, ExternalLink } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { PlayerComponent } from "@/components/remotion/PlayerComponent";
 
@@ -13,6 +13,9 @@ export default function CreatePage() {
     const [loading, setLoading] = useState(false);
     const [content, setContent] = useState("");
     const [videoUrl, setVideoUrl] = useState("");
+    const [driveUrl, setDriveUrl] = useState<string | null>(null);
+    const [generatedSummary, setGeneratedSummary] = useState<string>("");
+    const [safetyAlert, setSafetyAlert] = useState<{ reason: string; category?: string } | null>(null);
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
     const [step, setStep] = useState(0);
     const [progress, setProgress] = useState(0);
@@ -22,6 +25,7 @@ export default function CreatePage() {
     const [timer, setTimer] = useState(0);
     const [voiceId, setVoiceId] = useState<string | null>(null);
     const [cloningStatus, setCloningStatus] = useState<"idle" | "recording" | "uploading" | "done" | "error">("idle");
+    const [cloningError, setCloningError] = useState<string | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const chunksRef = useRef<Blob[]>([]);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -50,15 +54,13 @@ export default function CreatePage() {
 
             mediaRecorder.onstop = async () => {
                 const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-                // Enforce minimum duration (e.g. 30s) for quality? 
-                // Creating a warning rather than a block for now.
                 if (timer < 30) {
                     if (!confirm("Your recording is quite short (< 30s). Quality might be low. Clone anyway?")) {
                         return;
                     }
                 }
                 await handleVoiceUpload(blob);
-                stream.getTracks().forEach(track => track.stop()); // Stop mic
+                stream.getTracks().forEach(track => track.stop());
             };
 
             mediaRecorder.start();
@@ -84,51 +86,76 @@ export default function CreatePage() {
         }
     };
 
-    // ... handleVoiceUpload ...
-
     // Reading Script
     const readingScript = "When the sunlight strikes raindrops in the air, they act as a prism and form a rainbow. The rainbow is a division of white light into many beautiful colors. These take the shape of a long round arch, with its path high above, and its two ends apparently beyond the horizon. There is, according to legend, a boiling pot of gold at one end. People look, but no one ever finds it. When a man looks for something beyond his reach, his friends say he is looking for the pot of gold at the end of the rainbow.";
 
     const handleVoiceUpload = async (audioBlob: Blob) => {
         try {
+            setCloningError(null);
             const { ApiService } = await import("@/lib/api-service");
-            const newVoiceId = await ApiService.cloneVoice(audioBlob);
+            const result = await ApiService.cloneVoice(audioBlob);
 
-            if (newVoiceId) {
-                setVoiceId(newVoiceId);
+            if (result.voiceId) {
+                setVoiceId(result.voiceId);
                 setCloningStatus("done");
             } else {
                 setCloningStatus("error");
+                setCloningError(result.error || "Failed to clone voice");
             }
-        } catch (e) {
-            console.error("Voice Clone Error:", e);
+        } catch (e: any) {
             setCloningStatus("error");
+            setCloningError(e?.message || "Failed to clone voice");
         }
     };
 
+    const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
+    const isOverWordLimit = wordCount > 500;
+
     const handleGenerate = async () => {
+        if (isOverWordLimit) {
+            setSafetyAlert({
+                reason: `Content exceeds 500-word limit (${wordCount} words provided). Please shorten to under 500 words.`,
+                category: "length_exceeded",
+            });
+            return;
+        }
+
+        setSafetyAlert(null);
         setLoading(true);
         setStep(1);
 
         try {
             const { ApiService } = await import("@/lib/api-service");
-            // Pass content, image, and OPTIONAL voiceId
-            const url = await ApiService.generateFullVideo(content, selectedImage, voiceId, (status) => {
+            const result = await ApiService.generateFullVideo(content, selectedImage, voiceId, (status) => {
                 setProgress(status.progress);
                 if (status.step === 'error') {
                     setLoading(false);
-                    alert("Error: " + status.error);
+                    setStep(0);
+                    if (status.data?.safetyViolation) {
+                        setSafetyAlert({
+                            reason: status.error || "Content safety boundary triggered.",
+                            category: status.data?.category,
+                        });
+                    } else {
+                        alert("Generation Error:\n\n" + status.error);
+                    }
                 }
             });
 
-            if (url) {
-                setVideoUrl(url);
+            if (result && result.videoUrl) {
+                setVideoUrl(result.videoUrl);
+                if (result.driveUrl) setDriveUrl(result.driveUrl);
+                if (result.summary) setGeneratedSummary(result.summary);
                 setLoading(false);
                 setStep(2);
+            } else {
+                setLoading(false);
+                setStep(0);
             }
-        } catch (e) {
-            console.error(e);
+        } catch (e: any) {
+            console.warn("Generate Error:", e?.message || e);
             setLoading(false);
+            setStep(0);
         }
     };
 
@@ -136,17 +163,35 @@ export default function CreatePage() {
         <div className="min-h-screen flex flex-col items-center p-4 bg-background">
             <div className="absolute inset-0 -z-10 h-full w-full bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] [mask-image:radial-gradient(ellipse_50%_50%_at_50%_50%,#000_70%,transparent_100%)] dark:bg-[radial-gradient(#1f2937_1px,transparent_1px)] opacity-50"></div>
 
-            <div className="w-full max-w-4xl space-y-8 mt-10">
+            <div className="w-full max-w-4xl space-y-6 mt-6">
+                {/* Header Navigation Link */}
+                <div className="w-full flex items-center justify-between pb-2 border-b border-white/10 text-xs">
+                    <a
+                        href="https://winelogbooks.com/projects"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors font-medium"
+                    >
+                        <span>← Nathan Lester | AI Enablement Showcase</span>
+                    </a>
+                    <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-mono">
+                        Hostinger + Google Cloud
+                    </span>
+                </div>
+
                 <h1 className="text-4xl font-bold text-center bg-gradient-to-r from-blue-600 to-indigo-500 bg-clip-text text-transparent">
-                    Create New Video
+                    Edu-Avatar Creator
                 </h1>
+                <p className="text-center text-sm text-muted-foreground max-w-lg mx-auto">
+                    Transform any educational topic (≤ 500 words) into an animated talking-avatar video in under 30 seconds.
+                </p>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div className="space-y-6">
                         <Card className="shadow-lg">
                             <CardHeader>
                                 <CardTitle>Content Input</CardTitle>
-                                <CardDescription>Paste the text of the article or topic you want to explain.</CardDescription>
+                                <CardDescription>Provide your avatar selfie, optional voice sample, and educational topic.</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 {/* Step 1: Avatar Image */}
@@ -177,15 +222,56 @@ export default function CreatePage() {
                                     <Label className="text-blue-100">2. Your Voice (Optional)</Label>
                                     <div className="p-4 border border-white/10 rounded-lg bg-black/20 flex flex-col gap-4">
                                         {cloningStatus === "done" ? (
-                                            <div className="flex items-center text-green-400 gap-2 neon-text">
-                                                <CheckCircle2 className="w-5 h-5" />
-                                                <div>
-                                                    <p className="text-sm font-bold">Voice Cloned Successfully!</p>
-                                                    <p className="text-xs text-green-300/70">ID: {voiceId?.slice(0, 10)}...</p>
+                                            <div className="flex items-center justify-between text-green-400 gap-2 neon-text">
+                                                <div className="flex items-center gap-2">
+                                                    <CheckCircle2 className="w-5 h-5" />
+                                                    <div>
+                                                        <p className="text-sm font-bold">Voice Cloned Successfully!</p>
+                                                        <p className="text-xs text-green-300/70">ID: {voiceId?.slice(0, 10)}...</p>
+                                                    </div>
                                                 </div>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        setVoiceId(null);
+                                                        setCloningStatus("idle");
+                                                    }}
+                                                    className="text-xs text-gray-400 hover:text-white"
+                                                >
+                                                    Remove
+                                                </Button>
                                             </div>
                                         ) : (
                                             <>
+                                                {cloningError && (
+                                                    <div className="p-3 rounded border border-amber-500/30 bg-amber-500/10 text-amber-200 text-xs flex flex-col gap-2">
+                                                        <div className="flex items-start gap-2">
+                                                            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                                                            <div>
+                                                                <p className="font-semibold text-amber-300">Voice Cloning Notice</p>
+                                                                <p className="text-amber-200/90 mt-1 leading-relaxed">{cloningError}</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex items-center justify-between pt-1 border-t border-amber-500/20">
+                                                            <span className="text-[11px] text-amber-300/70">Automatic high-definition Gemini TTS fallback active.</span>
+                                                            <Button
+                                                                variant="secondary"
+                                                                size="sm"
+                                                                type="button"
+                                                                className="h-7 text-xs px-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200"
+                                                                onClick={() => {
+                                                                    setCloningError(null);
+                                                                    setCloningStatus("idle");
+                                                                    setVoiceId(null);
+                                                                }}
+                                                            >
+                                                                Use Free Voice
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                )}
+
                                                 {/* Option A: File Upload */}
                                                 <div className="space-y-2 pb-4 border-b border-white/10">
                                                     <Label className="text-xs text-blue-300/70 uppercase tracking-wider font-semibold">Option A: Upload Audio File</Label>
@@ -248,11 +334,43 @@ export default function CreatePage() {
 
                                 {/* Step 3: Text Content */}
                                 <div className="space-y-2">
-                                    <Label htmlFor="content">3. Knowledge Article / Text</Label>
+                                    <div className="flex items-center justify-between">
+                                        <Label htmlFor="content">3. Educational Topic / Text</Label>
+                                        <span className={`text-xs font-mono ${isOverWordLimit ? "text-red-400 font-semibold" : "text-muted-foreground"}`}>
+                                            {wordCount} / 500 words
+                                        </span>
+                                    </div>
+
+                                    {/* Content Safety Warning Banner */}
+                                    {safetyAlert && (
+                                        <div className="p-3.5 rounded-lg border border-red-500/40 bg-red-500/10 text-red-200 text-xs flex flex-col gap-2 animate-in fade-in duration-300">
+                                            <div className="flex items-start gap-2">
+                                                <ShieldAlert className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                                                <div className="space-y-1">
+                                                    <p className="font-semibold text-red-300">
+                                                        AI Safety Guardrail Triggered {safetyAlert.category ? `[${safetyAlert.category}]` : ""}
+                                                    </p>
+                                                    <p className="text-red-200/90 leading-relaxed">{safetyAlert.reason}</p>
+                                                </div>
+                                            </div>
+                                            <div className="flex justify-end pt-1 border-t border-red-500/20">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    type="button"
+                                                    className="h-6 text-xs text-red-300 hover:text-white"
+                                                    onClick={() => setSafetyAlert(null)}
+                                                >
+                                                    Dismiss
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <Textarea
                                         id="content"
-                                        placeholder="Paste article content here (max 500 words)..."
-                                        className="min-h-[150px]"
+                                        placeholder="Paste article or educational concept here (max 500 words)..."
+                                        className={`min-h-[150px] ${isOverWordLimit ? "border-red-500/60 focus-visible:ring-red-500" : ""}`}
                                         value={content}
                                         onChange={(e) => setContent(e.target.value)}
                                     />
@@ -260,7 +378,7 @@ export default function CreatePage() {
 
                                 <Button
                                     onClick={handleGenerate}
-                                    disabled={loading || step === 2 || !content}
+                                    disabled={loading || step === 2 || !content || isOverWordLimit}
                                     className="w-full bg-gradient-to-r from-blue-600 to-indigo-600"
                                 >
                                     {loading ? (
@@ -278,23 +396,23 @@ export default function CreatePage() {
                             <Card className="bg-muted/50">
                                 <CardContent className="pt-6 space-y-4">
                                     <div className="flex items-center justify-between text-sm">
-                                        <span>Generating Video...</span>
-                                        <span>{progress}%</span>
+                                        <span>Pipeline Progress</span>
+                                        <span className="font-mono">{progress}%</span>
                                     </div>
                                     <Progress value={progress} className="w-full h-2" />
 
                                     <div className="space-y-2 text-sm text-muted-foreground">
                                         <div className="flex items-center gap-2">
-                                            {progress > 10 ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <Loader2 className="h-4 w-4 animate-spin" />}
-                                            Summarizing text with Gemini...
+                                            {progress >= 30 ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <Loader2 className="h-4 w-4 animate-spin" />}
+                                            Guardrail check & Gemini 3.6 Flash summarization...
                                         </div>
                                         <div className="flex items-center gap-2">
-                                            {progress > 40 ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : (progress > 30 && <Loader2 className="h-4 w-4 animate-spin" />)}
-                                            Generating Voice ({voiceId ? "Cloned" : "Default"})...
+                                            {progress >= 70 ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : (progress >= 30 && <Loader2 className="h-4 w-4 animate-spin" />)}
+                                            Voice synthesis ({voiceId ? "Custom Cloned" : "Gemini TTS Free"})...
                                         </div>
                                         <div className="flex items-center gap-2">
-                                            {progress > 70 ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : (progress > 60 && <Loader2 className="h-4 w-4 animate-spin" />)}
-                                            Animating Avatar...
+                                            {progress >= 100 ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : (progress >= 70 && <Loader2 className="h-4 w-4 animate-spin" />)}
+                                            Rendering video & Google Drive archive...
                                         </div>
                                     </div>
                                 </CardContent>
@@ -302,21 +420,73 @@ export default function CreatePage() {
                         )}
                     </div>
 
-                    <div className="relative">
+                    <div className="relative space-y-4">
                         {/* Preview Area */}
                         {step === 2 && videoUrl ? (
-                            <Card className="overflow-hidden shadow-2xl border-0 h-full">
-                                <CardContent className="p-0 h-full">
-                                    <PlayerComponent videoUrl={videoUrl} captions={content.substring(0, 50) + "..."} />
-                                </CardContent>
-                            </Card>
+                            <div className="space-y-4">
+                                <Card className="overflow-hidden shadow-2xl border-0">
+                                    <CardContent className="p-0">
+                                        <PlayerComponent
+                                            videoUrl={videoUrl}
+                                            captions={generatedSummary || content.substring(0, 100) + "..."}
+                                            imageUrl={selectedImage}
+                                        />
+                                    </CardContent>
+                                </Card>
+
+                                {/* Action Toolbar */}
+                                <div className="p-4 rounded-xl border border-white/10 bg-black/40 backdrop-blur space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Generated Video Ready</span>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-7 text-xs text-blue-400 hover:text-blue-300"
+                                            onClick={() => {
+                                                setStep(0);
+                                                setVideoUrl("");
+                                                setDriveUrl(null);
+                                                setGeneratedSummary("");
+                                            }}
+                                        >
+                                            Create Another
+                                        </Button>
+                                    </div>
+
+                                    {/* Google Drive Archive Button */}
+                                    {driveUrl && (
+                                        <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg flex items-center justify-between">
+                                            <div className="flex items-center gap-2 text-xs text-blue-200">
+                                                <HardDrive className="w-4 h-4 text-blue-400 shrink-0" />
+                                                <span>Archived to Google Drive</span>
+                                            </div>
+                                            <a
+                                                href={driveUrl}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+                                            >
+                                                <span>Open in Drive</span>
+                                                <ExternalLink className="w-3 h-3" />
+                                            </a>
+                                        </div>
+                                    )}
+
+                                    {generatedSummary && (
+                                        <div className="text-xs text-muted-foreground border-t border-white/10 pt-2">
+                                            <span className="font-semibold text-foreground">30-Second Script: </span>
+                                            "{generatedSummary}"
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
                         ) : (
-                            <div className="h-full min-h-[400px] border-2 border-dashed border-gray-200 rounded-lg flex flex-col items-center justify-center text-gray-400 p-8 text-center">
-                                <div className="p-4 rounded-full bg-gray-50 mb-4">
+                            <div className="h-full min-h-[400px] border-2 border-dashed border-gray-200 dark:border-gray-800 rounded-lg flex flex-col items-center justify-center text-gray-400 p-8 text-center">
+                                <div className="p-4 rounded-full bg-gray-50 dark:bg-gray-900 mb-4">
                                     <Play className="w-8 h-8 opacity-50" />
                                 </div>
                                 <p className="font-medium">Video Preview</p>
-                                <p className="text-sm mt-2">Your content will appear here once generated.</p>
+                                <p className="text-sm mt-2">Your synchronized talking avatar will appear here once generated.</p>
                             </div>
                         )}
                     </div>

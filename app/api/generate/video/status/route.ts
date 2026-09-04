@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { GoogleDriveService } from "@/lib/google-drive";
 
 export async function POST(req: NextRequest) {
     try {
@@ -38,6 +39,32 @@ export async function POST(req: NextRequest) {
         const data = await response.json();
         const currentStatus = data.data?.status || data.status;
         console.log(`Video Status [${video_id}]: ${currentStatus}`);
+
+        if (currentStatus === 'completed') {
+            const videoUrl = data.data?.video_url || data.video_url;
+            if (videoUrl && !data.data?.drive_url) {
+                try {
+                    const driveService = new GoogleDriveService();
+                    const downloadRes = await fetch(videoUrl);
+                    if (downloadRes.ok) {
+                        const videoBuffer = Buffer.from(await downloadRes.arrayBuffer());
+                        const driveResult = await driveService.uploadFile(
+                            videoBuffer,
+                            `edu_avatar_${video_id}.mp4`,
+                            'video/mp4'
+                        );
+                        if (driveResult.success && driveResult.webViewLink) {
+                            if (data.data) {
+                                data.data.drive_url = driveResult.webViewLink;
+                            }
+                            data.drive_url = driveResult.webViewLink;
+                        }
+                    }
+                } catch (driveErr) {
+                    console.warn("Google Drive archive of HeyGen video failed (non-fatal):", driveErr);
+                }
+            }
+        }
 
         if (currentStatus === 'failed' || currentStatus === 'error') {
             console.error("HeyGen Failure Details:", JSON.stringify(data, null, 2));

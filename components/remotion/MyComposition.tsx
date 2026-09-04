@@ -3,6 +3,7 @@ import { AbsoluteFill, useVideoConfig, Video, Img, Audio } from 'remotion';
 // Helper to proxy the Google Drive URL to avoid CORS/CORB issues in the browser
 const proxyUrl = (url: string) => {
     if (!url) return "";
+    if (url.startsWith('data:')) return url;
     if (url.startsWith('/api/proxy')) return url;
     // We encode the component to be safe, though Google Drive URLs are usually simple
     return `/api/proxy/audio?url=${encodeURIComponent(url)}`;
@@ -10,10 +11,12 @@ const proxyUrl = (url: string) => {
 
 export const MyComposition = ({
     videoUrl,
-    captions
+    captions,
+    imageUrl
 }: {
     videoUrl: string;
     captions?: string;
+    imageUrl?: string;
 }) => {
     const { fps, durationInFrames, width, height } = useVideoConfig();
 
@@ -62,22 +65,24 @@ export const MyComposition = ({
                 }}>
                     {isVideo ? (
                         <Video
-                            src={mediaSrc}
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        // Muted? No, we want the audio track! But Audio tag is separate below.
-                        // If we use Video tag, it plays its own audio. We should disable the Audio tag below if using Video.
+                            {...({
+                                src: mediaSrc,
+                                style: { width: '100%', height: '100%', objectFit: 'cover' }
+                            } as any)}
                         />
                     ) : (
                         <Img
-                            src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=800&auto=format&fit=crop&q=60" // Placeholder Avatar
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            {...({
+                                src: imageUrl || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=800&auto=format&fit=crop&q=60",
+                                style: { width: '100%', height: '100%', objectFit: 'cover' }
+                            } as any)}
                         />
                     )}
                 </div>
             </AbsoluteFill>
 
             {/* Audio Layer: Only if NOT rendering Video (to avoid double audio) */}
-            {mediaSrc && !isVideo && <Audio src={mediaSrc} />}
+            {mediaSrc && !isVideo && <Audio {...({ src: mediaSrc } as any)} />}
 
 
 

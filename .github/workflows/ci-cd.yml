@@ -1,0 +1,100 @@
+﻿name: Edu-Avatar CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Lint, Type Check & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Type Check (TypeScript)
+        run: npx tsc --noEmit
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Build Next.js Application
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+          NODE_ENV: production
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY || 'ci-dummy-key' }}
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY || 'ci-dummy-key' }}
+          HEYGEN_API_KEY: ${{ secrets.HEYGEN_API_KEY || 'ci-dummy-key' }}
+
+  deploy:
+    name: Deploy to Hostinger VPS
+    needs: validate
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH to Hostinger VPS
+        uses: appleboy/ssh-action@v1.0.3
+        if: env.VPS_HOST != ''
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME || 'root' }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+            APP_DIR="/opt/edu-avatar"
+            echo "==> Deploying Edu-Avatar to Hostinger VPS..."
+            
+            if [ ! -d "$APP_DIR" ]; then
+              echo "Cloning repository to $APP_DIR..."
+              git clone https://github.com/N8Space/edu-avatar.git "$APP_DIR"
+            fi
+            
+            cd "$APP_DIR"
+            echo "Fetching latest changes..."
+            git pull origin main || git pull origin master
+            
+            # Setup environment variables if provided
+            if [ -n "${{ secrets.GOOGLE_API_KEY }}" ]; then
+              echo "Configuring environment..."
+              cat << 'EOF' > .env.local
+            GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
+            ELEVENLABS_API_KEY=${{ secrets.ELEVENLABS_API_KEY }}
+            HEYGEN_API_KEY=${{ secrets.HEYGEN_API_KEY }}
+            GOOGLE_SERVICE_ACCOUNT_JSON='${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}'
+            GOOGLE_DRIVE_FOLDER_ID=${{ secrets.GOOGLE_DRIVE_FOLDER_ID || '1bogWnsdHz_qjW-AHA5y9QAHWa7PdTQLw' }}
+            EOF
+            fi
+
+            echo "Starting Docker Compose container stack..."
+            docker compose down || true
+            docker compose up -d --build
+            
+            echo "Waiting for healthcheck..."
+            sleep 10
+            curl -f http://localhost:3000/api/health || exit 1
+            echo "==> Deployment Complete & Healthy!"

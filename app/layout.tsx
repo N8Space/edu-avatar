@@ -13,8 +13,16 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Vokome - AI Audio / Video Generator",
-  description: "Turn your selfie and voice into 30s avatar videos.",
+  title: "Edu-Avatar | AI Enablement Showcase by Nathan Lester",
+  description: "Transform educational knowledge articles (≤ 500 words) into personalized talking-avatar videos in 30 seconds. Built with Google Gemini 3.6 Flash, multi-tier AI safety guardrails, zero-cost voice synthesis, Remotion video engine, and Google Drive archiving.",
+  authors: [{ name: "Nathan Lester", url: "https://winelogbooks.com/projects" }],
+  openGraph: {
+    title: "Edu-Avatar | AI Enablement Showcase",
+    description: "Personalized Educational Talking Avatar Video Generator by Nathan Lester",
+    url: "https://winelogbooks.com/projects",
+    siteName: "Nathan Lester AI Enablement Portfolio",
+    type: "website",
+  },
 };
 
 export default function RootLayout({

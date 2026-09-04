@@ -36,7 +36,20 @@ export async function POST(req: NextRequest) {
         if (!response.ok) {
             const errorText = await response.text();
             console.error("ElevenLabs Voice Clone Failed:", errorText);
-            throw new Error(`ElevenLabs API error: ${response.statusText} - ${errorText}`);
+
+            let message = "Failed to clone voice.";
+            try {
+                const parsed = JSON.parse(errorText);
+                if (parsed?.detail?.status === "missing_permissions" || parsed?.detail?.message?.includes("voices_write")) {
+                    message = "Your ElevenLabs API key is missing the 'voices_write' permission. Instant Voice Cloning requires an API key with write permissions, which is only supported on paid plans (Starter or higher). You can proceed without voice cloning to use the default voice.";
+                } else if (parsed?.detail?.message) {
+                    message = parsed.detail.message;
+                }
+            } catch {
+                message = `ElevenLabs API error: ${response.statusText}`;
+            }
+
+            return NextResponse.json({ error: message }, { status: response.status });
         }
 
         const data = await response.json();
