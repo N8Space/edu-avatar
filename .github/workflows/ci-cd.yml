@@ -61,7 +61,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USERNAME || 'root' }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets['VPS_PORT'] || 22 }}
+          port: 22
           script: |
             set -e
             APP_DIR="/opt/edu-avatar"
@@ -82,7 +82,9 @@ jobs:
               cat << 'EOF' > .env.local
             GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
             GOOGLE_SERVICE_ACCOUNT_JSON='${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}'
-            GOOGLE_DRIVE_FOLDER_ID=${{ secrets['GOOGLE_DRIVE_FOLDER_ID'] || '1bogWnsdHz_qjW-AHA5y9QAHWa7PdTQLw' }}
+            GOOGLE_DRIVE_FOLDER_ID=1bogWnsdHz_qjW-AHA5y9QAHWa7PdTQLw
+            ELEVENLABS_API_KEY=${{ secrets.ELEVENLABS_API_KEY }}
+            HEYGEN_API_KEY=${{ secrets.HEYGEN_API_KEY }}
             EOF
             fi
 

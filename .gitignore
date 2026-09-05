@@ -33,8 +33,12 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 service_account_key.json
+*.token.json
+.google_oauth_token.json
+/public/generated
 test-*.ts
 debug-*.ts
+
 
 # vercel
 .vercel
